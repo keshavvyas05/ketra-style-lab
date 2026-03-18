@@ -1,21 +1,24 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Camera as CameraIcon, MessageCircle, Shirt, Trophy, ArrowUpRight, Gift, Crown, Zap, Sparkles, ChevronRight, X, ImagePlus, Edit2, ClipboardList } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Camera as CameraIcon, MessageCircle, Shirt, Trophy, ArrowUpRight, Gift, Crown, Zap, Sparkles, ChevronRight, X, ImagePlus, Edit2, ClipboardList, Loader2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
+
+const MAX_LOADING_MS = 3000;
 import featureTryonNeutral from "@/assets/feature-tryon-neutral.jpg";
 import featureStylistNeutral from "@/assets/feature-stylist-neutral.jpg";
 import featureOotwNeutral from "@/assets/feature-ootw-neutral.jpg";
 import newjeansCardBg from "@/assets/newjeans-card-ref.png";
 
-const user = {
-  name: "Amira",
-  photo: null,
-  instagram: "@amira.style",
-  plan: "Free" as "Free" | "Basic" | "Pro" | "Premium",
-  tryOnsRemaining: 2,
-  tryOnsTotal: 3,
+type UserProfileRow = {
+  full_name: string | null;
+  email: string | null;
+  plan: string | null;
+  tryon_count: number | null;
+  total_tryons_used: number | null;
 };
 
 const featureButtons = [
@@ -40,17 +43,21 @@ const planBadge: Record<string, { icon: typeof Zap; gradient: string }> = {
 };
 
 const DashboardPage = () => {
+  const navigate = useNavigate();
+  const { signOut, user: authUser } = useAuth();
   const [promoCode, setPromoCode] = useState("");
   const [profileEdit, setProfileEdit] = useState(false);
   const [profilePic, setProfilePic] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [profile, setProfile] = useState({
-    name: user.name,
+    name: "Ketra User",
     bio: "Fashion lover & street style enthusiast ✨",
-    instagram: user.instagram,
+    instagram: "",
     gender: "",
     age: "",
   });
+  const [dbUser, setDbUser] = useState<UserProfileRow | null>(null);
+  const [showContent, setShowContent] = useState(false);
 
   const surveyData = useMemo(() => {
     try {
@@ -61,14 +68,84 @@ const DashboardPage = () => {
   }, []);
 
   // Initialize profile gender/age from survey on first load
-  useState(() => {
+  useEffect(() => {
     if (surveyData) {
       setProfile(p => ({ ...p, gender: surveyData.gender || "", age: surveyData.age || "" }));
     }
-  });
+  }, [surveyData]);
 
-  const PlanIcon = planBadge[user.plan].icon;
-  const tryOnPercent = (user.tryOnsRemaining / user.tryOnsTotal) * 100;
+  // Cap loading at 3 seconds, then always show dashboard
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowContent(true);
+    }, MAX_LOADING_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Fetch user profile from public.users on mount
+  useEffect(() => {
+    if (!authUser) return;
+
+    let isMounted = true;
+
+    const loadProfile = async () => {
+      const { data, error } = await (supabase as any)
+        .from("users")
+        .select("full_name, email, plan, tryon_count, total_tryons_used")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (!isMounted) return;
+
+      const row = data as UserProfileRow | null;
+      if (!error && row) {
+        setDbUser(row);
+        const displayName = row.full_name?.trim() || authUser.email?.split("@")[0] || "Ketra User";
+        setProfile((prev) => ({ ...prev, name: displayName }));
+      } else {
+        // No row yet: use auth email as fallback name
+        setProfile((prev) => ({
+          ...prev,
+          name: authUser.email?.split("@")[0] || prev.name,
+        }));
+      }
+
+      setShowContent(true);
+    };
+
+    loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authUser]);
+
+  const normalizedPlan = (() => {
+    const plan = (dbUser?.plan || "free").toLowerCase();
+    if (plan === "basic") return "Basic";
+    if (plan === "pro") return "Pro";
+    if (plan === "premium") return "Premium";
+    return "Free";
+  })();
+
+  const tryOnsRemaining = dbUser?.tryon_count ?? 2;
+  const totalTryOnsUsed = dbUser?.total_tryons_used ?? 0;
+  const tryOnsTotal = tryOnsRemaining + totalTryOnsUsed || 2;
+
+  const PlanIcon = planBadge[normalizedPlan].icon;
+  const tryOnPercent = tryOnsTotal > 0 ? (tryOnsRemaining / tryOnsTotal) * 100 : 0;
+
+  if (!showContent) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <Loader2 className="h-10 w-10 animate-spin text-accent" />
+          <p className="text-muted-foreground font-body text-sm">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -100,7 +177,7 @@ const DashboardPage = () => {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-muted-foreground font-serif text-xs tracking-widest uppercase">Try-ons remaining</span>
                     <span className="font-serif text-sm font-bold text-foreground">
-                      {user.tryOnsRemaining}/{user.tryOnsTotal}
+                      {tryOnsRemaining}/{tryOnsTotal || "∞"}
                     </span>
                   </div>
                   <div className="w-full h-3 rounded-full bg-secondary overflow-hidden">
@@ -112,11 +189,11 @@ const DashboardPage = () => {
                     />
                   </div>
                   <div className="flex justify-between mt-1.5">
-                    {Array.from({ length: user.tryOnsTotal }).map((_, i) => (
+                    {Array.from({ length: Math.min(tryOnsTotal || 1, 5) }).map((_, i) => (
                       <div
                         key={i}
                         className={`w-2 h-2 rounded-full transition-colors ${
-                          i < user.tryOnsRemaining ? "bg-accent" : "bg-secondary"
+                          i < tryOnsRemaining ? "bg-accent" : "bg-secondary"
                         }`}
                       />
                     ))}
@@ -126,15 +203,15 @@ const DashboardPage = () => {
                 {/* Current Plan */}
                 <div className="mt-4 pt-4 flex items-center justify-between border-t border-border/40">
                   <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${planBadge[user.plan].gradient} flex items-center justify-center`}>
+                    <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${planBadge[normalizedPlan].gradient} flex items-center justify-center`}>
                       <PlanIcon size={16} className="text-background" />
                     </div>
                     <div>
                       <span className="text-muted-foreground font-serif text-[10px] tracking-widest uppercase block leading-none">Plan</span>
-                      <span className="font-serif text-lg font-bold">{user.plan}</span>
+                      <span className="font-serif text-lg font-bold">{normalizedPlan}</span>
                     </div>
                   </div>
-                  {user.plan === "Free" && (
+                  {normalizedPlan === "Free" && (
                     <Link to="/plans">
                       <motion.button
                         whileHover={{ scale: 1.03 }}
@@ -200,6 +277,14 @@ const DashboardPage = () => {
                   <div className="px-2.5 py-0.5 rounded-full text-[9px] font-display font-bold tracking-wider uppercase" style={{ background: "hsl(45 90% 60%)", color: "hsl(0 0% 20%)" }}>
                     ✦ LOOKING FOR ATTENTION !!!
                   </div>
+                  <button
+                    onClick={async () => {
+                      await signOut();
+                    }}
+                    className="text-xs font-body text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    Log out
+                  </button>
                 </div>
 
                 {/* Hearts row */}

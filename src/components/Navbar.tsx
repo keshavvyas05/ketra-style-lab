@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/auth/AuthProvider";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, User, ClipboardList, CreditCard, LogOut, Info } from "lucide-react";
 
@@ -20,6 +21,7 @@ const profileMenuItems = [
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const { signOut, user, loading } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
   const profileRef = useRef<HTMLDivElement>(null);
@@ -81,7 +83,7 @@ const Navbar = () => {
 
         <div className="flex items-center gap-4">
           {/* Sign Up CTA */}
-          <Link
+          {!loading && !user && <Link
             to="/auth"
             className={`inline-block px-4 md:px-5 py-1.5 md:py-2 text-[10px] md:text-xs font-body font-semibold tracking-[0.15em] uppercase rounded-full border transition-all duration-300 ${
               transparentNav && !scrolled
@@ -90,7 +92,7 @@ const Navbar = () => {
             }`}
           >
             Sign Up
-          </Link>
+          </Link>}
           {/* Hamburger menu (3 lines) */}
           <div className="relative" ref={profileRef}>
             <button
@@ -136,7 +138,10 @@ const Navbar = () => {
                     <div className="border-t border-border/40 my-1" />
                     <button
                       className="flex items-center gap-3 px-4 py-3 w-full font-body text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                      onClick={() => setProfileOpen(false)}
+                      onClick={async () => {
+                        setProfileOpen(false);
+                        await signOut();
+                      }}
                     >
                       <LogOut size={16} />
                       Sign Out

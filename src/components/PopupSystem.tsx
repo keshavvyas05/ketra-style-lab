@@ -90,7 +90,7 @@ const PopupShell = ({
     initial={{ opacity: 0 }}
     animate={{ opacity: 1 }}
     exit={{ opacity: 0 }}
-    className="fixed inset-0 z-[100] flex items-center justify-center px-4"
+    className="fixed inset-0 z-[9999] flex items-start justify-center px-4 py-8 overflow-y-auto"
     onClick={onClose}
   >
     <Backdrop onClick={onClose} />
@@ -100,9 +100,17 @@ const PopupShell = ({
       exit={{ opacity: 0, scale: 0.9, y: 20 }}
       transition={{ type: "spring", damping: 20, stiffness: 300 }}
       onClick={(e) => e.stopPropagation()}
-      className={`relative w-full ${maxW} rounded-2xl border border-border/50 bg-card p-8 text-center shadow-2xl`}
+      className={`relative w-full ${maxW} rounded-2xl border border-border/50 bg-card text-center shadow-2xl z-[10000] max-h-[90vh] flex flex-col`}
     >
-      {children}
+      <div className="flex-shrink-0 p-8 pb-4 relative">
+        {/* Close button positioned at top right */}
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-8 pb-8 min-h-0">
+        {children}
+      </div>
     </motion.div>
   </motion.div>
 );
@@ -263,7 +271,7 @@ export const AILoadingOverlay = ({ open }: { open: boolean }) => (
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center px-4"
+        className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
       >
         <div className="absolute inset-0 bg-background/90 backdrop-blur-md" />
         <motion.div
@@ -542,7 +550,7 @@ export const PaymentSuccessFullPage = ({ open, onClose, planName, tryOnsAdded, r
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center px-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
         >
           <div className="absolute inset-0 bg-background/95 backdrop-blur-lg" />
           <motion.div
@@ -793,6 +801,28 @@ export const NewWeekPopup = ({ open, onClose, lastWinner }: NewWeekProps) => (
         </div>
         <Subtitle>Submit your outfit this week for a chance to win!</Subtitle>
         <PrimaryBtn onClick={onClose}>Submit My Outfit</PrimaryBtn>
+      </PopupShell>
+    )}
+  </AnimatePresence>
+);
+
+// ─── GENERIC POPUP SYSTEM ───────────────────────────────────
+
+interface PopupSystemProps extends BaseProps {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}
+
+export const PopupSystem = ({ open, onClose, title, description, children }: PopupSystemProps) => (
+  <AnimatePresence>
+    {open && (
+      <PopupShell onClose={onClose} maxW="max-w-md">
+        <div className="text-left mb-4">
+          <h2 className="font-display text-xl font-extrabold tracking-wide mb-1">{title}</h2>
+          <p className="text-muted-foreground font-body text-sm">{description}</p>
+        </div>
+        {children}
       </PopupShell>
     )}
   </AnimatePresence>

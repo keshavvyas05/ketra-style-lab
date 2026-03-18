@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Lock, User, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24">
@@ -23,11 +25,92 @@ const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({ name: "", email: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, user, loading: authLoading } = useAuth();
+  const [justSignedUp, setJustSignedUp] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [user, authLoading, navigate]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      localStorage.removeItem("sb-ckujdaafecugnysiscyh-auth-token");
+    }
+  }, [user, authLoading]);
+
+  // Listen for auth state changes and redirect immediately
+  
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate("/");
+    setError(null);
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        await signInWithEmail(formData.email, formData.password);
+      } else {
+        await signUpWithEmail(formData.name, formData.email, formData.password);
+        setJustSignedUp(true);
+      }
+    } catch (err: unknown) {
+      setLoading(false);
+      const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      setError(message);
+    }
   };
+
+  const handleGoogleLogin = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      await signInWithGoogle();
+    } catch (err: unknown) {
+      setLoading(false);
+      const message = err?.message ?? "Google sign-in failed. Please try again.";
+      setError(message);
+    }
+  };
+
+  // After successful signup, ensure a profile row exists in public.users
+  useEffect(() => {
+    if (!justSignedUp || !user) return;
+
+    const createProfile = async () => {
+      try {
+        await supabase.from("users").insert({
+          id: user.id,
+          email: user.email,
+          plan: "free",
+          tryon_count: 2,
+          total_tryons_used: 0,
+          is_active: true,
+        });
+      } catch (err) {
+        console.error("Failed to create user profile", err);
+      } finally {
+        setJustSignedUp(false);
+      }
+    };
+
+    createProfile();
+  }, [justSignedUp, user]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground" style={{ background: "hsl(260 20% 6%)" }}>
+        <div className="text-center">
+          <Loader2 size={24} className="animate-spin mx-auto mb-4" style={{ color: "hsl(270 50% 60%)" }} />
+          <p className="text-sm" style={{ color: "hsl(270 15% 65%)" }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden" style={{ background: "hsl(260 20% 6%)" }}>
@@ -151,6 +234,8 @@ const AuthPage = () => {
           {/* Social buttons */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <button
+              type="button"
+              onClick={handleGoogleLogin}
               className="flex items-center justify-center gap-2 py-3 rounded-xl font-body text-sm transition-all duration-300 hover:scale-[1.02]"
               style={{
                 background: "hsl(260 15% 15%)",
@@ -268,6 +353,7 @@ const AuthPage = () => {
 
             <motion.button
               type="submit"
+              disabled={loading}
               whileHover={{ scale: 1.02, boxShadow: "0 0 30px hsl(270 70% 50% / 0.4)" }}
               whileTap={{ scale: 0.98 }}
               className="w-full py-3.5 rounded-xl font-display text-sm tracking-[0.15em] uppercase flex items-center justify-center gap-2 transition-all duration-300"
@@ -277,10 +363,25 @@ const AuthPage = () => {
                 boxShadow: "0 4px 20px hsl(270 70% 45% / 0.3)",
               }}
             >
-              {isLogin ? "Log In" : "Create Account"}
-              <ArrowRight size={16} />
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  {isLogin ? "Logging in..." : "Creating account..."}
+                </>
+              ) : (
+                <>
+                  {isLogin ? "Log In" : "Create Account"}
+                  <ArrowRight size={16} />
+                </>
+              )}
             </motion.button>
           </form>
+
+          {error && (
+            <p className="mt-4 text-center text-sm text-red-400 font-body">
+              {error}
+            </p>
+          )}
 
           <p className="text-center font-body text-xs mt-6" style={{ color: "hsl(270 15% 45%)" }}>
             {isLogin ? "Don't have an account? " : "Already have an account? "}

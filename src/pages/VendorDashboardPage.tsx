@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Package, Code, Palette, CreditCard, BarChart3,
   HelpCircle, LogOut, Menu, X, ChevronRight
 } from "lucide-react";
+import { useAuth } from "@/auth/AuthProvider";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Overview", id: "overview" },
@@ -25,6 +26,7 @@ const statCards = [
 
 const VendorDashboardPage = () => {
   const navigate = useNavigate();
+  const { signOut, vendor } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -46,8 +48,12 @@ const VendorDashboardPage = () => {
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-accent/20 flex items-center justify-center text-accent font-display font-bold text-sm">F</div>
             <div>
-              <p className="font-body text-sm font-medium text-foreground">Fab Fashion Co.</p>
-              <p className="font-body text-xs text-muted-foreground">fabstore.ketra.fashion</p>
+              <p className="font-body text-sm font-medium text-foreground">
+                {vendor?.store_name ?? "Vendor"}
+              </p>
+              <p className="font-body text-xs text-muted-foreground">
+                {vendor?.email ?? ""}
+              </p>
             </div>
           </div>
         </div>
@@ -71,7 +77,10 @@ const VendorDashboardPage = () => {
 
         <div className="p-4 border-t border-border">
           <button
-            onClick={() => navigate("/")}
+            onClick={async () => {
+              await signOut();
+              navigate("/vendor/login");
+            }}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-body text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
           >
             <LogOut size={18} /> Log Out

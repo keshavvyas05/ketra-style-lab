@@ -2,21 +2,30 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { Loader2, Eye, EyeOff } from "lucide-react";
+import { useAuth } from "@/auth/AuthProvider";
 
 const VendorLoginPage = () => {
   const navigate = useNavigate();
+  const { vendorSignIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      await vendorSignIn(email, password);
       navigate("/vendor/dashboard");
-    }, 1200);
+    } catch (err: any) {
+      const message = err?.message ?? "Login failed. Please check your credentials.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const inputClass = "w-full px-4 py-3.5 rounded-xl bg-secondary border border-border text-foreground font-body text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 transition-all duration-300";
@@ -89,9 +98,21 @@ const VendorLoginPage = () => {
               disabled={loading}
               className="w-full py-3.5 rounded-xl font-body font-semibold text-sm tracking-wider uppercase text-accent-foreground bg-accent hover:bg-accent/90 disabled:opacity-70 transition-all duration-300 flex items-center justify-center gap-2"
             >
-              {loading ? <><Loader2 size={18} className="animate-spin" /> Logging in...</> : "Login"}
+              {loading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" /> Logging in...
+                </>
+              ) : (
+                "Login"
+              )}
             </button>
           </form>
+
+          {error && (
+            <p className="mt-4 text-center text-sm text-red-400 font-body">
+              {error}
+            </p>
+          )}
 
           {/* Divider */}
           <div className="flex items-center gap-4 my-8">

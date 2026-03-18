@@ -1,5 +1,6 @@
-import { useState } from "react";
-import SuccessPopup from "@/components/SuccessPopup";
+import { useEffect, useMemo, useState } from "react";
+import { PopupSystem } from "@/components/PopupSystem";
+import  OutfitSubmissionForm  from "@/components/OutfitSubmissionForm";;
 import { motion } from "framer-motion";
 import FeaturePageLayout from "@/components/FeaturePageLayout";
 import { Heart, Upload, ThumbsUp, Crown, Trophy, Medal } from "lucide-react";
@@ -9,6 +10,9 @@ import featureStylistNeutral from "@/assets/feature-stylist-neutral.jpg";
 import featureTryonNeutral from "@/assets/feature-tryon-neutral.jpg";
 import mascotJumping from "@/assets/mascot-jumping.png";
 import mascotSitting from "@/assets/mascot-sitting.png";
+import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
+import { useNavigate } from "react-router-dom";
 
 const Glitter = ({ x, y, delay, size = 8 }: { x: number; y: number; delay: number; size?: number }) => (
   <motion.div
@@ -78,20 +82,66 @@ const steps = [
   { step: "03", title: "Upload Yours", desc: "Submit your own outfit and get featured." },
 ];
 
-const feedOutfits = [
-  { id: 1, image: featureOotwNeutral, title: "Street Minimal", votes: 342 },
-  { id: 2, image: featureStylistNeutral, title: "Urban Layer", votes: 518 },
-  { id: 3, image: featureTryonNeutral, title: "Clean Edge", votes: 275 },
-  { id: 4, image: featureOotwNeutral, title: "Soft Structure", votes: 189 },
-];
+type OutfitSubmissionRow = {
+  id: string;
+  photo_url: string | null;
+  instagram_id: string | null;
+  community_votes: number | null;
+  week_number: number | null;
+  year: number | null;
+};
 
-const leaderboard = [
-  { rank: 1, name: "Amira K.", handle: "@amira.style", likes: 2847, image: featureStylistNeutral },
-  { rank: 2, name: "Zain R.", handle: "@zain.drip", likes: 2134, image: featureTryonNeutral },
-  { rank: 3, name: "Layla M.", handle: "@laylamode", likes: 1892, image: featureOotwNeutral },
-  { rank: 4, name: "Omar S.", handle: "@omar.fits", likes: 1456, image: featureStylistNeutral },
-  { rank: 5, name: "Noor H.", handle: "@noor.chic", likes: 1203, image: featureTryonNeutral },
-];
+type FeedOutfit = {
+  id: string;
+  image: string;
+  title: string;
+  votes: number;
+};
+
+type LeaderboardEntry = {
+  rank: number;
+  name: string;
+  handle: string;
+  likes: number;
+  image: string;
+};
+
+const normalizeHandle = (handle: string | null | undefined) => {
+  const raw = (handle || "").trim();
+  if (!raw) return "@ketra.user";
+  return raw.startsWith("@") ? raw : `@${raw}`;
+};
+
+const displayNameFromHandle = (handle: string) => {
+  const cleaned = handle.replace(/^@/, "").replace(/[._]/g, " ").trim();
+  if (!cleaned) return "Ketra User";
+  return cleaned
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+};
+
+const getNextMonday = (from: Date) => {
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  // JS: 0=Sun, 1=Mon, ... 6=Sat
+  const day = d.getDay();
+  const daysUntilMonday = ((8 - day) % 7) || 7;
+  d.setDate(d.getDate() + daysUntilMonday);
+  return d;
+};
+
+const formatCountdown = (ms: number) => {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${days}d ${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+};
 
 const rankIcons = [Crown, Trophy, Medal];
 const rankColors = [
@@ -101,11 +151,129 @@ const rankColors = [
 ];
 
 const OOTWPage = () => {
-  const [votedIds, setVotedIds] = useState<Set<number>>(new Set());
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
   const [hasLanded, setHasLanded] = useState(false);
   const [showSubmitPopup, setShowSubmitPopup] = useState(false);
+  const [checkingSubmission, setCheckingSubmission] = useState(true);
+  const [alreadySubmittedThisWeek, setAlreadySubmittedThisWeek] = useState(false);
+  const [showAlreadyMessage, setShowAlreadyMessage] = useState(false);
+  const [countdownMs, setCountdownMs] = useState(() => getNextMonday(new Date()).getTime() - Date.now());
+  const [feedOutfits, setFeedOutfits] = useState<FeedOutfit[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
-  const handleVote = (id: number) => {
+  const { weekNumber, year } = useMemo(() => {
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const weekNumber = Math.ceil(((now.getTime() - startOfYear.getTime()) / 86400000 + startOfYear.getDay() + 1) / 7);
+    const year = now.getFullYear();
+    return { weekNumber, year };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkThisWeek = async () => {
+      if (!user) {
+        if (isMounted) {
+          setAlreadySubmittedThisWeek(false);
+          setCheckingSubmission(false);
+        }
+        return;
+      }
+
+      const { data, error } = await (supabase as any)
+        .from("outfit_submissions")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("week_number", weekNumber)
+        .eq("year", year)
+        .limit(1);
+
+      if (!isMounted) return;
+
+      if (error) {
+        // Fail open: allow submit if check fails
+        setAlreadySubmittedThisWeek(false);
+      } else {
+        setAlreadySubmittedThisWeek(!!(data && data.length > 0));
+      }
+
+      setCheckingSubmission(false);
+    };
+
+    checkThisWeek();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, weekNumber, year]);
+
+  useEffect(() => {
+    const tick = () => {
+      setCountdownMs(getNextMonday(new Date()).getTime() - Date.now());
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadOOTW = async () => {
+      const { data, error } = await (supabase as any)
+        .from("outfit_submissions")
+        .select("id, photo_url, instagram_id, community_votes, week_number, year")
+        .eq("week_number", weekNumber)
+        .eq("year", year)
+        .order("community_votes", { ascending: false })
+        .limit(50);
+
+      if (!isMounted) return;
+
+      if (error) {
+        // Fail soft: keep empty state
+        setFeedOutfits([]);
+        setLeaderboard([]);
+        return;
+      }
+
+      const rows = (data as OutfitSubmissionRow[]) || [];
+      const mappedFeed: FeedOutfit[] = rows.slice(0, 12).map((r) => {
+        const handle = normalizeHandle(r.instagram_id);
+        return {
+          id: r.id,
+          image: r.photo_url || featureOotwNeutral,
+          title: handle,
+          votes: r.community_votes ?? 0,
+        };
+      });
+
+      const mappedLeaderboard: LeaderboardEntry[] = rows.slice(0, 5).map((r, idx) => {
+        const handle = normalizeHandle(r.instagram_id);
+        return {
+          rank: idx + 1,
+          name: displayNameFromHandle(handle),
+          handle,
+          likes: r.community_votes ?? 0,
+          image: r.photo_url || featureStylistNeutral,
+        };
+      });
+
+      setFeedOutfits(mappedFeed);
+      setLeaderboard(mappedLeaderboard);
+    };
+
+    loadOOTW();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [weekNumber, year]);
+
+  const handleVote = (id: string) => {
     setVotedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -208,14 +376,45 @@ const OOTWPage = () => {
                 <p className="text-muted-foreground font-body text-sm mb-5">
                   Submit your outfit and get featured in next week's drop.
                 </p>
+
+                {(alreadySubmittedThisWeek || showAlreadyMessage) && (
+                  <div className="w-full rounded-xl border border-border/40 bg-secondary/30 p-4 mb-3">
+                    <p className="font-body text-sm text-foreground font-medium">
+                      You've already submitted this week! Come back next Monday when the leaderboard resets.
+                    </p>
+                    <p className="text-muted-foreground font-body text-xs mt-2">
+                      Resets in <span className="font-display font-bold text-foreground">{formatCountdown(countdownMs)}</span>
+                    </p>
+                  </div>
+                )}
+
                 <div
-                  onClick={() => setShowSubmitPopup(true)}
+                  onClick={() => {
+                    if (!user) {
+                      navigate("/auth");
+                      return;
+                    }
+                    if (alreadySubmittedThisWeek) {
+                      setShowAlreadyMessage(true);
+                      return;
+                    }
+                    setShowSubmitPopup(true);
+                  }}
                   className="w-full h-32 rounded-xl border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-2 hover:border-primary/40 transition-colors cursor-pointer"
                 >
                   <Upload size={28} className="text-muted-foreground" />
                   <span className="text-muted-foreground font-body text-xs">Drag & drop or click to upload</span>
                 </div>
-                <SuccessPopup open={showSubmitPopup} onClose={() => setShowSubmitPopup(false)} variant="outfit-submitted" />
+                <PopupSystem open={showSubmitPopup} onClose={() => setShowSubmitPopup(false)} title="Submit Your Outfit" description="Share your style with the community!">
+                  <OutfitSubmissionForm
+                    onClose={() => setShowSubmitPopup(false)}
+                    onSuccess={() => {
+                      setShowSubmitPopup(false);
+                      setAlreadySubmittedThisWeek(true);
+                      setShowAlreadyMessage(true);
+                    }}
+                  />
+                </PopupSystem>
               </motion.div>
 
               <motion.div
@@ -225,10 +424,10 @@ const OOTWPage = () => {
                 className="bg-card/55 backdrop-blur-sm rounded-2xl p-6 neon-border relative"
               >
                 {/* Sitting mascot near How It Works with glitter */}
-                <div className="absolute -top-14 -right-10 z-20 pointer-events-none">
+                <div className="absolute -top-14 -right-10  pointer-events-none">
                   <Glitter x={-6} y={10} delay={1.2} size={6} />
                   <Glitter x={45} y={-2} delay={0.7} size={8} />
-                  <Glitter x={65} y={25} delay={1.5} size={7} />
+                  <Glitter x={65} y={25} delay={1.5} size={7} z-20/>
                   <Glitter x={15} y={50} delay={0.4} size={6} />
                   <motion.img
                     src={mascotSitting}
