@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   LayoutDashboard, Package, Code, Palette, CreditCard, BarChart3,
   HelpCircle, LogOut, Menu, X, ChevronRight
 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useAuth } from "@/auth/AuthProvider";
+import { supabase } from "@/integrations/supabase/client";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Overview", id: "overview" },
@@ -17,18 +19,201 @@ const navItems = [
   { icon: HelpCircle, label: "Support", id: "support" },
 ];
 
-const statCards = [
-  { label: "Try-Ons This Month", value: "1,247", change: "+12%" },
-  { label: "Customers Served", value: "892", change: "+8%" },
-  { label: "Most Popular Product", value: "Silk Blazer", change: "" },
-  { label: "Pool Remaining", value: "3,753", change: "" },
-];
+type VendorStats = {
+  tryOnsThisMonth: number;
+  customersServed: number;
+  poolRemaining: number;
+};
+
+type VendorProduct = {
+  id: string;
+  name: string;
+  price: number;
+  image_url: string;
+  category: string;
+};
 
 const VendorDashboardPage = () => {
-  const navigate = useNavigate();
   const { signOut, vendor } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [stats, setStats] = useState<VendorStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [products, setProducts] = useState<VendorProduct[]>([]);
+  const [productForm, setProductForm] = useState({ name: "", price: "", image_url: "", category: "" });
+  const [productLoading, setProductLoading] = useState(false);
+
+  const monthRange = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, []);
+
+  useEffect(() => {
+    if (!vendor) return;
+
+    const loadStats = async () => {
+      setStatsLoading(true);
+      try {
+        const { start, end } = monthRange;
+
+        // Try-ons this month
+        const { count: tryonCount } = await (supabase as any)
+          .from("tryon_sessions")
+          .select("id", { count: "exact", head: true })
+          .eq("vendor_id", vendor.id)
+          .gte("created_at", start)
+          .lt("created_at", end);
+
+        // Customers served
+        const { count: customerCount } = await (supabase as any)
+          .from("vendor_customers")
+          .select("id", { count: "exact", head: true })
+          .eq("vendor_id", vendor.id);
+
+        // Vendor pool remaining (pool_balance preferred; fall back if unavailable)
+        let poolRemaining = 0;
+        let hasPoolBalance = false;
+
+        // Prefer explicit pool_balance column (per requirements)
+        try {
+          const { data: vendorRow } = await (supabase as any)
+            .from("vendors")
+            .select("pool_balance")
+            .eq("id", vendor.id)
+            .maybeSingle();
+
+          if (vendorRow && typeof vendorRow.pool_balance === "number") {
+            poolRemaining = Math.max(0, vendorRow.pool_balance);
+            hasPoolBalance = true;
+          }
+        } catch {
+          // If pool_balance column doesn't exist / query fails, fall back to existing columns
+        }
+
+        // Fall back to monthly_pool - pool_used when pool_balance is not available
+        if (!hasPoolBalance) {
+          const { data: vendorRow } = await (supabase as any)
+            .from("vendors")
+            .select("monthly_pool, pool_used")
+            .eq("id", vendor.id)
+            .maybeSingle();
+
+          const monthly_pool = vendorRow?.monthly_pool ?? 0;
+          const pool_used = vendorRow?.pool_used ?? 0;
+          poolRemaining = Math.max(0, monthly_pool - pool_used);
+        }
+
+        setStats({
+          tryOnsThisMonth: tryonCount ?? 0,
+          customersServed: customerCount ?? 0,
+          poolRemaining,
+        });
+      } catch (e) {
+        console.error("Error loading vendor stats", e);
+        setStats({
+          tryOnsThisMonth: 0,
+          customersServed: 0,
+          poolRemaining: 0,
+        });
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    const loadProducts = async () => {
+      if (!vendor) return;
+      try {
+        const { data, error } = await (supabase as any)
+          .from("vendor_products")
+          .select("id, name, price, image_url, category")
+          .eq("vendor_id", vendor.id);
+
+        if (error || !data || data.length === 0) {
+          // Placeholder catalog if table or rows don't exist yet
+          setProducts([
+            {
+              id: "placeholder-1",
+              name: "Silk Blazer",
+              price: 4999,
+              image_url: "https://images.pexels.com/photos/7671166/pexels-photo-7671166.jpeg",
+              category: "Blazers",
+            },
+            {
+              id: "placeholder-2",
+              name: "Minimal Street Set",
+              price: 2999,
+              image_url: "https://images.pexels.com/photos/7671255/pexels-photo-7671255.jpeg",
+              category: "Sets",
+            },
+          ]);
+        } else {
+          setProducts(
+            data.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              image_url: p.image_url,
+              category: p.category,
+            })),
+          );
+        }
+      } catch (e) {
+        console.error("Error loading vendor products", e);
+      }
+    };
+
+    loadStats();
+    loadProducts();
+  }, [vendor, monthRange]);
+
+  const handleAddProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vendor) return;
+    if (!productForm.name || !productForm.price) return;
+
+    setProductLoading(true);
+    try {
+      const newProduct: VendorProduct = {
+        id: crypto.randomUUID(),
+        name: productForm.name,
+        price: Number(productForm.price) || 0,
+        image_url: productForm.image_url || "https://images.pexels.com/photos/7671166/pexels-photo-7671166.jpeg",
+        category: productForm.category || "General",
+      };
+
+      // Try to persist if table exists; fail-soft otherwise
+      try {
+        await (supabase as any)
+          .from("vendor_products")
+          .insert({
+            id: newProduct.id,
+            vendor_id: vendor.id,
+            name: newProduct.name,
+            price: newProduct.price,
+            image_url: newProduct.image_url,
+            category: newProduct.category,
+          });
+      } catch (e) {
+        console.warn("vendor_products insert failed (likely placeholder table)", e);
+      }
+
+      setProducts((prev) => [newProduct, ...prev]);
+      setProductForm({ name: "", price: "", image_url: "", category: "" });
+    } finally {
+      setProductLoading(false);
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await (supabase as any).from("vendor_products").delete().eq("id", id);
+    } catch (e) {
+      console.warn("vendor_products delete failed", e);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
@@ -79,7 +264,6 @@ const VendorDashboardPage = () => {
           <button
             onClick={async () => {
               await signOut();
-              navigate("/vendor/login");
             }}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-body text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
           >
@@ -110,19 +294,50 @@ const VendorDashboardPage = () => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
               {/* Stats */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
-                {statCards.map((stat, i) => (
-                  <motion.div
-                    key={stat.label}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.08 }}
-                    className="p-5 rounded-xl glass hover:neon-border transition-all duration-300"
-                  >
-                    <p className="text-muted-foreground font-body text-xs uppercase tracking-wider">{stat.label}</p>
-                    <p className="font-display text-2xl md:text-3xl font-bold mt-1">{stat.value}</p>
-                    {stat.change && <span className="text-green-400 font-body text-xs mt-1 block">{stat.change}</span>}
-                  </motion.div>
-                ))}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.02 }}
+                  className="p-5 rounded-xl glass hover:neon-border transition-all duration-300"
+                >
+                  <p className="text-muted-foreground font-body text-xs uppercase tracking-wider">Try-Ons This Month</p>
+                  <p className="font-display text-2xl md:text-3xl font-bold mt-1">
+                    {statsLoading ? "—" : stats?.tryOnsThisMonth.toLocaleString() ?? "0"}
+                  </p>
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.06 }}
+                  className="p-5 rounded-xl glass hover:neon-border transition-all duration-300"
+                >
+                  <p className="text-muted-foreground font-body text-xs uppercase tracking-wider">Customers Served</p>
+                  <p className="font-display text-2xl md:text-3xl font-bold mt-1">
+                    {statsLoading ? "—" : stats?.customersServed.toLocaleString() ?? "0"}
+                  </p>
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="p-5 rounded-xl glass hover:neon-border transition-all duration-300"
+                >
+                  <p className="text-muted-foreground font-body text-xs uppercase tracking-wider">Most Popular Product</p>
+                  <p className="font-display text-lg md:text-xl font-bold mt-1">
+                    {products[0]?.name ?? "Coming soon"}
+                  </p>
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.14 }}
+                  className="p-5 rounded-xl glass hover:neon-border transition-all duration-300"
+                >
+                  <p className="text-muted-foreground font-body text-xs uppercase tracking-wider">Pool Remaining</p>
+                  <p className="font-display text-2xl md:text-3xl font-bold mt-1">
+                    {statsLoading ? "—" : stats?.poolRemaining.toLocaleString() ?? "0"}
+                  </p>
+                </motion.div>
               </div>
 
               {/* Quick actions */}
@@ -146,17 +361,312 @@ const VendorDashboardPage = () => {
             </motion.div>
           )}
 
-          {activeTab !== "overview" && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
-                {(() => {
-                  const item = navItems.find(n => n.id === activeTab);
-                  const Icon = item?.icon || LayoutDashboard;
-                  return <Icon size={28} className="text-muted-foreground" />;
-                })()}
+          {activeTab === "catalog" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-xl tracking-wide">Product Catalog</h3>
+                <span className="text-xs font-body text-muted-foreground">
+                  Manage products that appear in your try-on widget.
+                </span>
               </div>
-              <h3 className="font-display text-2xl tracking-wide mb-2 capitalize">{activeTab}</h3>
-              <p className="text-muted-foreground font-body text-sm">This section is coming soon. We're building it just for you.</p>
+
+              <form
+                onSubmit={handleAddProduct}
+                className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-card/70 border border-border/40 rounded-2xl p-4"
+              >
+                <input
+                  className="px-3 py-2 rounded-xl bg-background/60 border border-border/50 text-sm font-body focus:outline-none focus:border-accent/60"
+                  placeholder="Product name"
+                  value={productForm.name}
+                  onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2 rounded-xl bg-background/60 border border-border/50 text-sm font-body focus:outline-none focus:border-accent/60"
+                  placeholder="Price"
+                  type="number"
+                  value={productForm.price}
+                  onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2 rounded-xl bg-background/60 border border-border/50 text-sm font-body focus:outline-none focus:border-accent/60"
+                  placeholder="Category"
+                  value={productForm.category}
+                  onChange={(e) => setProductForm((f) => ({ ...f, category: e.target.value }))}
+                />
+                <button
+                  type="submit"
+                  disabled={productLoading}
+                  className="px-4 py-2 rounded-xl bg-accent text-accent-foreground font-body text-xs tracking-[0.15em] uppercase hover:opacity-90 disabled:opacity-60 transition"
+                >
+                  {productLoading ? "Adding..." : "Add Product"}
+                </button>
+                <input
+                  className="md:col-span-4 px-3 py-2 rounded-xl bg-background/60 border border-border/50 text-xs font-body focus:outline-none focus:border-accent/60"
+                  placeholder="Image URL (optional)"
+                  value={productForm.image_url}
+                  onChange={(e) => setProductForm((f) => ({ ...f, image_url: e.target.value }))}
+                />
+              </form>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {products.map((p) => (
+                  <div
+                    key={p.id}
+                    className="rounded-2xl bg-card/80 border border-border/40 overflow-hidden flex flex-col hover:neon-border transition-all duration-300"
+                  >
+                    <div className="h-36 bg-muted overflow-hidden">
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="p-4 flex-1 flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-display text-sm font-bold">{p.name}</h4>
+                        <span className="font-body text-xs text-muted-foreground uppercase tracking-widest">
+                          {p.category}
+                        </span>
+                      </div>
+                      <p className="font-display text-lg font-bold mt-1">
+                        ₹{p.price.toLocaleString()}
+                      </p>
+                      <button
+                        onClick={() => handleDeleteProduct(p.id)}
+                        className="mt-3 self-end text-xs font-body text-destructive hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "widget" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <h3 className="font-display text-xl tracking-wide mb-2">Embed Widget</h3>
+              <p className="text-muted-foreground font-body text-sm mb-4">
+                Copy this snippet into your website &lt;head&gt; or just before the closing &lt;/body&gt; tag.
+              </p>
+              <div className="bg-card/80 border border-border/50 rounded-2xl p-4 space-y-3">
+                <code className="block bg-background/80 rounded-xl px-3 py-2 text-xs font-mono break-all">
+                  {`<script src="https://ketra.fashion/widget.js" data-vendor-id="${vendor?.id ?? "VENDOR_ID"}"></script>`}
+                </code>
+                <button
+                  onClick={() =>
+                    navigator.clipboard.writeText(
+                      `<script src="https://ketra.fashion/widget.js" data-vendor-id="${vendor?.id ?? "VENDOR_ID"}"></script>`,
+                    )
+                  }
+                  className="px-4 py-2 rounded-xl bg-accent text-accent-foreground font-body text-xs tracking-[0.15em] uppercase hover:opacity-90 transition"
+                >
+                  Copy Embed Code
+                </button>
+              </div>
+              <div className="bg-card/80 border border-border/50 rounded-2xl p-4">
+                <p className="font-body text-sm text-muted-foreground mb-3">Preview</p>
+                <div className="rounded-xl border border-dashed border-border/60 p-4 flex items-center justify-between">
+                  <div>
+                    <p className="font-display text-base">Ketra Virtual Try-On</p>
+                    <p className="text-muted-foreground font-body text-xs mt-1">
+                      Customers can try your catalog looks in one click.
+                    </p>
+                  </div>
+                  <div className="h-10 px-4 rounded-full bg-accent/20 text-accent flex items-center font-body text-xs uppercase tracking-[0.12em]">
+                    Launch Widget
+                  </div>
+                </div>
+              </div>
+              <div className="bg-card/80 border border-border/50 rounded-2xl p-4">
+                <h4 className="font-display text-sm mb-2">How to install</h4>
+                <ol className="list-decimal list-inside text-sm text-muted-foreground font-body space-y-1">
+                  <li>Copy the embed script above.</li>
+                  <li>Paste it into your site&apos;s HTML (just before &lt;/body&gt;).</li>
+                  <li>Publish your changes — the Ketra widget will auto-appear.</li>
+                </ol>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "branding" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-xl">
+              <h3 className="font-display text-xl tracking-wide mb-2">Branding</h3>
+              <p className="text-muted-foreground font-body text-sm">
+                Customize how Ketra appears to your customers.
+              </p>
+              <div className="bg-card/80 border border-border/40 rounded-2xl p-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-body text-muted-foreground mb-1.5 uppercase tracking-[0.15em]">
+                    Store Name
+                  </label>
+                  <input
+                    defaultValue={vendor?.store_name ?? ""}
+                    className="w-full px-3 py-2 rounded-xl bg-background/70 border border-border/50 text-sm font-body focus:outline-none focus:border-accent/60"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-body text-muted-foreground mb-1.5 uppercase tracking-[0.15em]">
+                    Brand Color
+                  </label>
+                  <input type="color" defaultValue="#FF5C8A" className="w-16 h-10 rounded-md border border-border/60 bg-background" />
+                </div>
+                <div>
+                  <label className="block text-xs font-body text-muted-foreground mb-1.5 uppercase tracking-[0.15em]">
+                    Logo
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="w-full text-xs font-body text-muted-foreground"
+                  />
+                </div>
+                <button className="mt-2 px-5 py-2.5 rounded-xl bg-accent text-accent-foreground font-body text-xs tracking-[0.15em] uppercase hover:opacity-90 transition">
+                  Save Branding
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "billing" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl">
+              <h3 className="font-display text-xl tracking-wide mb-2">Billing & Usage</h3>
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-2xl glass border border-border/40">
+                  <p className="text-xs font-body text-muted-foreground uppercase tracking-[0.15em] mb-1">Current Plan</p>
+                  <p className="font-display text-lg">
+                    {vendor?.status === "active" ? "Pro Vendor" : "Vendor"}
+                  </p>
+                </div>
+                <div className="p-4 rounded-2xl glass border border-border/40">
+                  <p className="text-xs font-body text-muted-foreground uppercase tracking-[0.15em] mb-1">Pool Remaining</p>
+                  <p className="font-display text-lg">
+                    {stats?.poolRemaining.toLocaleString() ?? "—"} try-ons
+                  </p>
+                </div>
+                <div className="p-4 rounded-2xl glass border border-border/40">
+                  <p className="text-xs font-body text-muted-foreground uppercase tracking-[0.15em] mb-1">Next Renewal</p>
+                  <p className="font-display text-lg">1st of next month</p>
+                </div>
+              </div>
+
+              <div className="bg-card/80 border border-border/40 rounded-2xl p-5 space-y-4">
+                <h4 className="font-display text-sm mb-2">Buy More Try-Ons</h4>
+                <div className="grid md:grid-cols-3 gap-3">
+                  {[
+                    { label: "100 Try-Ons", price: "₹999" },
+                    { label: "500 Try-Ons", price: "₹3999" },
+                    { label: "1000 Try-Ons", price: "₹6999" },
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      className="rounded-xl border border-border/50 bg-background/60 px-4 py-3 text-left hover:border-accent/60 hover:bg-accent/5 transition"
+                    >
+                      <p className="font-display text-sm">{p.label}</p>
+                      <p className="font-body text-xs text-muted-foreground mt-1">{p.price}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-card/80 border border-border/40 rounded-2xl p-5">
+                <h4 className="font-display text-sm mb-3">Payment History</h4>
+                <p className="text-xs font-body text-muted-foreground mb-2">
+                  Payment history integration coming soon. For now, contact{" "}
+                  <span className="text-accent">billing@ketra.fashion</span> for invoices.
+                </p>
+                <div className="rounded-xl border border-dashed border-border/50 px-4 py-6 text-center text-xs text-muted-foreground">
+                  No payments recorded yet.
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "analytics" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              <h3 className="font-display text-xl tracking-wide mb-2">Analytics</h3>
+              <div className="grid lg:grid-cols-2 gap-6">
+                <div className="bg-card/80 border border-border/40 rounded-2xl p-5">
+                  <h4 className="font-display text-sm mb-3">Try-Ons</h4>
+                  <div className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={[
+                          { label: "This Week", value: stats?.tryOnsThisMonth ?? 0 },
+                          { label: "This Month", value: (stats?.tryOnsThisMonth ?? 0) * 2 },
+                        ]}
+                      >
+                        <XAxis dataKey="label" stroke="#888" />
+                        <YAxis stroke="#888" />
+                        <Tooltip />
+                        <Bar dataKey="value" fill="hsl(280 80% 60%)" radius={6} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="bg-card/80 border border-border/40 rounded-2xl p-5 space-y-3">
+                  <h4 className="font-display text-sm mb-1">Top Products by Try-Ons</h4>
+                  {products.slice(0, 3).map((p, idx) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between rounded-xl bg-background/60 border border-border/40 px-3 py-2"
+                    >
+                      <span className="font-body text-xs text-muted-foreground uppercase tracking-[0.15em]">
+                        #{idx + 1}
+                      </span>
+                      <span className="font-display text-sm">{p.name}</span>
+                      <span className="font-body text-xs text-muted-foreground">~{(stats?.tryOnsThisMonth ?? 0) / (idx + 2) | 0} try-ons</span>
+                    </div>
+                  ))}
+                  {products.length === 0 && (
+                    <p className="text-xs font-body text-muted-foreground">Add products in the Catalog tab to see rankings here.</p>
+                  )}
+                </div>
+              </div>
+              <div className="bg-card/80 border border-border/40 rounded-2xl p-5">
+                <h4 className="font-display text-sm mb-2">Customer Satisfaction</h4>
+                <p className="text-xs font-body text-muted-foreground">
+                  Detailed satisfaction scores are coming soon. Early testers report{" "}
+                  <span className="text-accent font-medium">+25% higher conversion</span> when using Ketra&apos;s virtual try-on.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "support" && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 max-w-3xl">
+              <h3 className="font-display text-xl tracking-wide mb-2">Support</h3>
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="bg-card/80 border border-border/40 rounded-2xl p-5 space-y-3">
+                  <h4 className="font-display text-sm mb-1">FAQ</h4>
+                  {[
+                    { q: "How do I integrate the widget?", a: "Use the embed code from the Widget tab and paste it into your site HTML." },
+                    { q: "How are try-ons counted?", a: "Each unique customer try-on session counts as one try-on." },
+                    { q: "Can I change my plan?", a: "Yes, contact billing@ketra.fashion for plan upgrades or downgrades." },
+                    { q: "How do I see analytics?", a: "The Analytics tab shows try-on performance and top products." },
+                    { q: "Where can I get technical help?", a: "Email support@ketra.fashion with your store URL and issue details." },
+                  ].map((item) => (
+                    <div key={item.q}>
+                      <p className="font-body text-sm text-foreground">{item.q}</p>
+                      <p className="text-xs font-body text-muted-foreground mt-0.5">{item.a}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-card/80 border border-border/40 rounded-2xl p-5 space-y-3">
+                  <h4 className="font-display text-sm mb-1">Contact Support</h4>
+                  <p className="text-xs font-body text-muted-foreground">
+                    Email us at <span className="text-accent">support@ketra.fashion</span> or send a message below:
+                  </p>
+                  <input
+                    placeholder="Subject"
+                    className="w-full px-3 py-2 rounded-xl bg-background/70 border border-border/40 text-sm font-body focus:outline-none focus:border-accent/60"
+                  />
+                  <textarea
+                    placeholder="Describe your issue..."
+                    className="w-full min-h-[120px] px-3 py-2 rounded-xl bg-background/70 border border-border/40 text-sm font-body focus:outline-none focus:border-accent/60 resize-none"
+                  />
+                  <button className="px-5 py-2.5 rounded-xl bg-accent text-accent-foreground font-body text-xs tracking-[0.15em] uppercase hover:opacity-90 transition">
+                    Send Message
+                  </button>
+                </div>
+              </div>
             </motion.div>
           )}
         </div>

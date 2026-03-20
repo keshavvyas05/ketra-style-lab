@@ -4,6 +4,7 @@ import { ArrowLeft, Store, Code, BarChart3, Check, Loader2 } from "lucide-react"
 import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { supabase } from "@/integrations/supabase/client";
 
 const benefits = [
   { icon: Store, title: "Your Own Branded Subdomain", desc: "Get a custom storefront like yourstore.ketra.fashion with your branding, logo, and colors." },
@@ -34,20 +35,33 @@ const VendorPage = () => {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
-    storeName: "", ownerName: "", email: "", phone: "", country: "", website: "", traffic: "", hearAbout: "",
+    storeName: "", ownerName: "", email: "", phone: "", country: "", countryCode: "", website: "", traffic: "", hearAbout: "",
   });
 
   const selectedCountry = countries.find(c => c.code === form.country);
 
   const handleChange = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.storeName || !form.ownerName || !form.email || !form.phone || !form.countryCode || !form.traffic || !form.hearAbout) {
+      alert("Please fill in all required fields");
+      return;
+    }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const { error } = await supabase.from("vendors" as any).insert({
+        store_name: form.storeName,
+        email: form.email,
+        status: "pending",
+      });
+      if (error) throw error;
       setSubmitted(true);
-    }, 1500);
+    } catch (err) {
+      alert("Registration failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -108,7 +122,7 @@ const VendorPage = () => {
                   <h2 className="font-display text-3xl md:text-4xl font-bold tracking-wide">Register Your <span className="gradient-text">Store</span></h2>
                   <p className="text-muted-foreground font-body text-sm mt-2">Fill in your details and we'll get you set up</p>
                 </div>
-                <form onSubmit={handleSubmit} className="space-y-5 p-6 md:p-10 rounded-2xl glass">
+                <form onSubmit={handleSubmit} noValidate className="space-y-5 p-6 md:p-10 rounded-2xl glass">
                   <div>
                     <label className={labelClass}>Store Name *</label>
                     <input className={inputClass} placeholder="e.g. Fab Fashion Co." value={form.storeName} onChange={e => handleChange("storeName", e.target.value)} required />
@@ -126,7 +140,7 @@ const VendorPage = () => {
                   <div>
                     <label className={labelClass}>Phone Number *</label>
                     <div className="flex gap-2">
-                      <select className={`${inputClass} w-32 shrink-0`} value={form.country} onChange={e => handleChange("country", e.target.value)} required>
+                      <select className={`${inputClass} w-32 shrink-0`} value={form.countryCode} onChange={e => handleChange("countryCode", e.target.value)}>
                         <option value="">Code</option>
                         {countries.map(c => (
                           <option key={c.code} value={c.code}>{c.flag} {c.dial}</option>
@@ -138,8 +152,8 @@ const VendorPage = () => {
 
                   {/* Country */}
                   <div>
-                    <label className={labelClass}>Country *</label>
-                    <select className={inputClass} value={form.country} onChange={e => handleChange("country", e.target.value)} required>
+                    <label className={labelClass}>Country </label>
+                    <select className={inputClass} value={form.country} onChange={e => handleChange("country", e.target.value)}>
                       <option value="">Select your country</option>
                       {countries.map(c => (
                         <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
@@ -154,7 +168,7 @@ const VendorPage = () => {
 
                   <div>
                     <label className={labelClass}>Expected Monthly Customer Traffic *</label>
-                    <select className={inputClass} value={form.traffic} onChange={e => handleChange("traffic", e.target.value)} required>
+                    <select className={inputClass} value={form.traffic} onChange={e => handleChange("traffic", e.target.value)}>
                       <option value="">Select range</option>
                       {trafficOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
@@ -162,7 +176,7 @@ const VendorPage = () => {
 
                   <div>
                     <label className={labelClass}>How did you hear about Ketra? *</label>
-                    <select className={inputClass} value={form.hearAbout} onChange={e => handleChange("hearAbout", e.target.value)} required>
+                    <select className={inputClass} value={form.hearAbout} onChange={e => handleChange("hearAbout", e.target.value)}>
                       <option value="">Select one</option>
                       {hearAboutOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>

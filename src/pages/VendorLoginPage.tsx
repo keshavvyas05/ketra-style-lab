@@ -20,8 +20,8 @@ const VendorLoginPage = () => {
     try {
       await vendorSignIn(email, password);
       navigate("/vendor/dashboard");
-    } catch (err: any) {
-      const message = err?.message ?? "Login failed. Please check your credentials.";
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Login failed. Please check your credentials.";
       setError(message);
     } finally {
       setLoading(false);
