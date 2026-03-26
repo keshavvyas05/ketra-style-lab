@@ -59,7 +59,7 @@ const VendorDashboardPage = () => {
         const { start, end } = monthRange;
 
         // Try-ons this month
-        const { count: tryonCount } = await (supabase as any)
+        const { count: tryonCount } = await supabase
           .from("tryon_sessions")
           .select("id", { count: "exact", head: true })
           .eq("vendor_id", vendor.id)
@@ -67,43 +67,20 @@ const VendorDashboardPage = () => {
           .lt("created_at", end);
 
         // Customers served
-        const { count: customerCount } = await (supabase as any)
+        const { count: customerCount } = await supabase
           .from("vendor_customers")
           .select("id", { count: "exact", head: true })
           .eq("vendor_id", vendor.id);
 
-        // Vendor pool remaining (pool_balance preferred; fall back if unavailable)
-        let poolRemaining = 0;
-        let hasPoolBalance = false;
+        const { data: vendorRow } = await supabase
+          .from("vendors")
+          .select("monthly_pool, pool_used")
+          .eq("id", vendor.id)
+          .maybeSingle();
 
-        // Prefer explicit pool_balance column (per requirements)
-        try {
-          const { data: vendorRow } = await (supabase as any)
-            .from("vendors")
-            .select("pool_balance")
-            .eq("id", vendor.id)
-            .maybeSingle();
-
-          if (vendorRow && typeof vendorRow.pool_balance === "number") {
-            poolRemaining = Math.max(0, vendorRow.pool_balance);
-            hasPoolBalance = true;
-          }
-        } catch {
-          // If pool_balance column doesn't exist / query fails, fall back to existing columns
-        }
-
-        // Fall back to monthly_pool - pool_used when pool_balance is not available
-        if (!hasPoolBalance) {
-          const { data: vendorRow } = await (supabase as any)
-            .from("vendors")
-            .select("monthly_pool, pool_used")
-            .eq("id", vendor.id)
-            .maybeSingle();
-
-          const monthly_pool = vendorRow?.monthly_pool ?? 0;
-          const pool_used = vendorRow?.pool_used ?? 0;
-          poolRemaining = Math.max(0, monthly_pool - pool_used);
-        }
+        const monthly_pool = vendorRow?.monthly_pool ?? 0;
+        const pool_used = vendorRow?.pool_used ?? 0;
+        const poolRemaining = Math.max(0, monthly_pool - pool_used);
 
         setStats({
           tryOnsThisMonth: tryonCount ?? 0,
@@ -124,44 +101,22 @@ const VendorDashboardPage = () => {
 
     const loadProducts = async () => {
       if (!vendor) return;
-      try {
-        const { data, error } = await (supabase as any)
-          .from("vendor_products")
-          .select("id, name, price, image_url, category")
-          .eq("vendor_id", vendor.id);
-
-        if (error || !data || data.length === 0) {
-          // Placeholder catalog if table or rows don't exist yet
-          setProducts([
-            {
-              id: "placeholder-1",
-              name: "Silk Blazer",
-              price: 4999,
-              image_url: "https://images.pexels.com/photos/7671166/pexels-photo-7671166.jpeg",
-              category: "Blazers",
-            },
-            {
-              id: "placeholder-2",
-              name: "Minimal Street Set",
-              price: 2999,
-              image_url: "https://images.pexels.com/photos/7671255/pexels-photo-7671255.jpeg",
-              category: "Sets",
-            },
-          ]);
-        } else {
-          setProducts(
-            data.map((p: any) => ({
-              id: p.id,
-              name: p.name,
-              price: p.price,
-              image_url: p.image_url,
-              category: p.category,
-            })),
-          );
-        }
-      } catch (e) {
-        console.error("Error loading vendor products", e);
-      }
+      setProducts([
+        {
+          id: "placeholder-1",
+          name: "Silk Blazer",
+          price: 4999,
+          image_url: "https://images.pexels.com/photos/7671166/pexels-photo-7671166.jpeg",
+          category: "Blazers",
+        },
+        {
+          id: "placeholder-2",
+          name: "Minimal Street Set",
+          price: 2999,
+          image_url: "https://images.pexels.com/photos/7671255/pexels-photo-7671255.jpeg",
+          category: "Sets",
+        },
+      ]);
     };
 
     loadStats();
@@ -183,22 +138,6 @@ const VendorDashboardPage = () => {
         category: productForm.category || "General",
       };
 
-      // Try to persist if table exists; fail-soft otherwise
-      try {
-        await (supabase as any)
-          .from("vendor_products")
-          .insert({
-            id: newProduct.id,
-            vendor_id: vendor.id,
-            name: newProduct.name,
-            price: newProduct.price,
-            image_url: newProduct.image_url,
-            category: newProduct.category,
-          });
-      } catch (e) {
-        console.warn("vendor_products insert failed (likely placeholder table)", e);
-      }
-
       setProducts((prev) => [newProduct, ...prev]);
       setProductForm({ name: "", price: "", image_url: "", category: "" });
     } finally {
@@ -208,11 +147,6 @@ const VendorDashboardPage = () => {
 
   const handleDeleteProduct = async (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
-    try {
-      await (supabase as any).from("vendor_products").delete().eq("id", id);
-    } catch (e) {
-      console.warn("vendor_products delete failed", e);
-    }
   };
 
   return (
@@ -263,7 +197,7 @@ const VendorDashboardPage = () => {
         <div className="p-4 border-t border-border">
           <button
             onClick={async () => {
-              await signOut();
+              await signOut("/vendor/login");
             }}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-body text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
           >

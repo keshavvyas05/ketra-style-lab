@@ -63,7 +63,9 @@ const DashboardPage = () => {
     try {
       const raw = localStorage.getItem("ketra-style-survey");
       if (raw) return JSON.parse(raw) as { gender: string; age: string; bodyType: string; skinTone: string; clothingStyles: string[] };
-    } catch {}
+    } catch {
+      return null;
+    }
     return null;
   }, []);
 
@@ -89,7 +91,7 @@ const DashboardPage = () => {
     let isMounted = true;
 
     const loadProfile = async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("users")
         .select("full_name, email, plan, tryon_count, total_tryons_used")
         .eq("id", authUser.id)

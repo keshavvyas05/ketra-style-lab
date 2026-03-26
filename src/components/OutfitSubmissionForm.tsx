@@ -58,7 +58,7 @@ const OutfitSubmissionForm: React.FC<OutfitSubmissionFormProps> = ({ onClose, on
 
     try {
       // Check for existing submission
-      const { data: existingSubmission, error: checkError } = await (supabase as any)
+      const { data: existingSubmission, error: checkError } = await supabase
         .from('outfit_submissions')
         .select('id')
         .eq('user_id', user.id)
@@ -86,7 +86,7 @@ const OutfitSubmissionForm: React.FC<OutfitSubmissionFormProps> = ({ onClose, on
       const photo_url = `${supabase.storage.from('outfit-photos').getPublicUrl(filePath).data.publicUrl}`;
 
       // Save submission to Supabase
-      const { error: insertError } = await (supabase as any)
+      const { error: insertError } = await supabase
         .from('outfit_submissions')
         .insert({
           user_id: user.id,

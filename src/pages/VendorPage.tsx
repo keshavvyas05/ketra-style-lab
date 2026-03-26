@@ -44,13 +44,13 @@ const VendorPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.storeName || !form.ownerName || !form.email || !form.phone || !form.countryCode || !form.traffic || !form.hearAbout) {
+    if (!form.storeName || !form.ownerName || !form.email || !form.phone || !form.traffic || !form.hearAbout) {
       alert("Please fill in all required fields");
       return;
     }
     setLoading(true);
     try {
-      const { error } = await supabase.from("vendors" as any).insert({
+      const { error } = await supabase.from("vendors").insert({
         store_name: form.storeName,
         email: form.email,
         status: "pending",
@@ -139,15 +139,13 @@ const VendorPage = () => {
                   {/* Phone with country code */}
                   <div>
                     <label className={labelClass}>Phone Number *</label>
-                    <div className="flex gap-2">
-                      <select className={`${inputClass} w-32 shrink-0`} value={form.countryCode} onChange={e => handleChange("countryCode", e.target.value)}>
-                        <option value="">Code</option>
-                        {countries.map(c => (
-                          <option key={c.code} value={c.code}>{c.flag} {c.dial}</option>
-                        ))}
-                      </select>
-                      <input type="tel" className={inputClass} placeholder="555 123 4567" value={form.phone} onChange={e => handleChange("phone", e.target.value)} required />
-                    </div>
+                    <input 
+                      type="tel" 
+                      className={inputClass} 
+                      placeholder="+91 555 123 4567" 
+                      value={form.phone} 
+                      onChange={e => handleChange("phone", e.target.value)} 
+                    />
                   </div>
 
                   {/* Country */}

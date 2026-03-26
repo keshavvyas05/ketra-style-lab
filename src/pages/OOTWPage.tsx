@@ -183,7 +183,7 @@ const OOTWPage = () => {
         return;
       }
 
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("outfit_submissions")
         .select("id")
         .eq("user_id", user.id)
@@ -223,7 +223,7 @@ const OOTWPage = () => {
     let isMounted = true;
 
     const loadOOTW = async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("outfit_submissions")
         .select("id, photo_url, instagram_id, community_votes, week_number, year")
         .eq("week_number", weekNumber)

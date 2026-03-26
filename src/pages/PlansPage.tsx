@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import SuccessPopup from "@/components/SuccessPopup";
-import { Check, Zap, Medal, Shield, Crown, Shirt, Vote, Upload, Bot, Calendar, Infinity } from "lucide-react";
+import { Check, Zap, Medal, Shield, Crown, Shirt, Vote, Upload, Bot, Calendar, Infinity as InfinityIcon } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
@@ -61,7 +61,7 @@ const plans = [
     icon: Crown,
     desc: "The ultimate KETRA experience for the most powerful styling tools.",
     features: [
-      { text: "Unlimited Virtual Try-Ons", icon: Infinity },
+      { text: "Unlimited Virtual Try-Ons", icon: InfinityIcon },
       { text: "Unlimited OOTW uploads & voting", icon: Vote },
       { text: "Fully personalized AI Stylist", icon: Bot },
     ],

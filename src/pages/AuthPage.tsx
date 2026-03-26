@@ -57,6 +57,7 @@ const AuthPage = () => {
         await signUpWithEmail(formData.name, formData.email, formData.password);
         setJustSignedUp(true);
       }
+      setLoading(false);
     } catch (err: unknown) {
       setLoading(false);
       const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
@@ -72,7 +73,7 @@ const AuthPage = () => {
       await signInWithGoogle();
     } catch (err: unknown) {
       setLoading(false);
-      const message = err?.message ?? "Google sign-in failed. Please try again.";
+      const message = err instanceof Error ? err.message : "Google sign-in failed. Please try again.";
       setError(message);
     }
   };

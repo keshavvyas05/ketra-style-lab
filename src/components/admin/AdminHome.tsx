@@ -51,7 +51,17 @@ const StatCard = ({ label, value, growth, icon: Icon, color }: { label: string; 
   </div>
 );
 
-const ChartTooltipContent = ({ active, payload, label }: any) => {
+type ChartTooltipPayload = {
+  value: number;
+};
+
+type ChartTooltipContentProps = {
+  active?: boolean;
+  payload?: ChartTooltipPayload[];
+  label?: string;
+};
+
+const ChartTooltipContent = ({ active, payload, label }: ChartTooltipContentProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-card border border-border/50 rounded-lg px-3 py-2 shadow-xl">

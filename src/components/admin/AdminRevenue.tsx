@@ -3,7 +3,17 @@ import { DollarSign, TrendingUp, Users, Zap } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { adminStats, revenueByPlan, revenueByVendor, revenueOverMonths, newPayingUsersPerMonth } from "@/data/adminMockData";
 
-const ChartTooltip = ({ active, payload, label }: any) => {
+type ChartTooltipPayload = {
+  value: number | string;
+};
+
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: ChartTooltipPayload[];
+  label?: string;
+};
+
+const ChartTooltip = ({ active, payload, label }: ChartTooltipProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-card border border-border/50 rounded-lg px-3 py-2 shadow-xl">

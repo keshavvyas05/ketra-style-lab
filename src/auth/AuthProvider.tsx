@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,7 +23,7 @@ type AuthContextValue = {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   vendorSignIn: (email: string, password: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: (redirectTo?: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -46,10 +47,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (authUser) {
           const appUser: AppUser = { id: authUser.id, email: authUser.email ?? null };
           setUser(appUser);
+          
+          // Try to restore vendor session from localStorage first for faster UI
+          const storedVendorSession = localStorage.getItem("vendor_session");
+          if (storedVendorSession) {
+            try {
+              const vendorData: Vendor = JSON.parse(storedVendorSession);
+              setVendor(vendorData);
+            } catch (e) {
+              console.error("Error parsing vendor session:", e);
+            }
+          }
+          
           await Promise.all([ensureUserProfile(appUser), loadVendorForUser(appUser)]);
         } else {
           setUser(null);
           setVendor(null);
+          localStorage.removeItem("vendor_session");
         }
       } catch (err) {
         console.error("Auth init error:", err);
@@ -70,6 +84,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
         setVendor(null);
         localStorage.removeItem("sb-ckujdaafecugnysiscyh-auth-token");
+        localStorage.removeItem("vendor_session");
         setLoading(false);
         return;
       }
@@ -127,7 +142,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase
       .from("vendors")
       .select("id, email, store_name, status")
-      .eq("email", appUser.email)
+      .ilike("email", appUser.email.trim())
       .maybeSingle();
 
     if (error) {
@@ -177,34 +192,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const vendorSignIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const authUser = data.user;
-    if (!authUser) return;
-    await ensureUserProfile({ id: authUser.id, email: authUser.email ?? null });
+    // Clear old vendor session to prevent conflicts
+    localStorage.removeItem("vendor_session");
 
     const { data: vendorRow, error: vendorError } = await supabase
       .from("vendors")
       .select("id, email, store_name, status")
-      .eq("email", email)
+      .ilike("email", normalizedEmail)
       .maybeSingle();
 
     if (vendorError) throw vendorError;
     if (!vendorRow) {
-      await supabase.auth.signOut();
       throw new Error("No vendor account found for this email.");
     }
 
-    setVendor({
+    let authUser: { id: string; email?: string | null } | null = null;
+
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+
+    if (!signInError) {
+      authUser = signInData.user;
+    } else {
+      const isInvalidCredentials = signInError.message.toLowerCase().includes("invalid login credentials");
+
+      if (!isInvalidCredentials) {
+        throw signInError;
+      }
+
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (signUpError && !signUpError.message.toLowerCase().includes("already registered")) {
+        throw signUpError;
+      }
+
+      const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (retryError) {
+        throw retryError;
+      }
+
+      authUser = retryData.user;
+    }
+
+    if (!authUser) {
+      throw new Error("Unable to start vendor session. Please try again.");
+    }
+
+    await ensureUserProfile({ id: authUser.id, email: authUser.email ?? null });
+
+    const vendorData: Vendor = {
       id: vendorRow.id,
       email: vendorRow.email,
       store_name: vendorRow.store_name,
       status: vendorRow.status,
-    });
+    };
+
+    setVendor(vendorData);
+    // Store vendor session for persistence on page refresh
+    localStorage.setItem("vendor_session", JSON.stringify(vendorData));
   };
 
-  const signOut = async () => {
+  const signOut = async (redirectTo?: string) => {
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -213,8 +272,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       setVendor(null);
       localStorage.removeItem("sb-ckujdaafecugnysiscyh-auth-token");
+      localStorage.removeItem("vendor_session");
       sessionStorage.clear();
-      window.location.href = "/auth";
+      window.location.href = redirectTo ?? "/auth";
     }
   };
 
