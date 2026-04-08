@@ -7,6 +7,7 @@ import bgImage from "@/assets/feature-vto-bg.jpg";
 import vtoCanvas from "@/assets/vto-canvas.png";
 import mascotStanding from "@/assets/mascot-standing.png";
 import mascotLamp from "@/assets/mascot-lamp.png";
+import VirtualTryOnUploader from "@/components/virtual-tryon/VirtualTryOnUploader";
 
 const Glitter = ({ x, y, delay, size = 8 }: { x: number; y: number; delay: number; size?: number }) => (
   <motion.div
@@ -176,11 +177,7 @@ const VirtualTryOnPage = () => {
                   <div className="h-px w-10 bg-border/30" />
                 </div>
 
-                {/* Icon + text */}
-                <div className="p-3 rounded-full bg-secondary/50">
-                  <Camera className="text-muted-foreground" size={24} />
-                </div>
-                <p className="text-muted-foreground font-body text-xs tracking-[0.2em] uppercase">Your outfit will appear here</p>
+                <VirtualTryOnUploader onSuccess={handleTryOn} />
               </motion.div>
 
               {/* Mascot with flight animation + glitter */}

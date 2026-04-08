@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Users, Store, Camera, DollarSign, CreditCard, Gift, Bell, Trophy,
@@ -7,10 +7,8 @@ import {
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
-import {
-  adminStats, recentSignups, recentVendorRegs, recentPayments,
-  urgentAlerts, userGrowthData, dailyTryOnsData
-} from "@/data/adminMockData";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 
 const StatusBadge = ({ status }: { status: string }) => {
   const s: Record<string, string> = {
@@ -71,7 +69,149 @@ const ChartTooltipContent = ({ active, payload, label }: ChartTooltipContentProp
   );
 };
 
-const AdminHome = () => (
+type UserRow = Tables<"users">;
+type VendorRow = Tables<"vendors">;
+type SubmissionRow = Tables<"outfit_submissions">;
+
+const dayLabel = (date: string | null) =>
+  date ? new Date(date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
+
+const AdminHome = () => {
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [vendors, setVendors] = useState<VendorRow[]>([]);
+  const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    const loadData = async () => {
+      setLoading(true);
+      const [usersRes, vendorsRes, submissionsRes] = await Promise.all([
+        supabase.from("users").select("*"),
+        supabase.from("vendors").select("*"),
+        supabase.from("outfit_submissions").select("*"),
+      ]);
+
+      if (!alive) return;
+
+      if (usersRes.error || vendorsRes.error || submissionsRes.error) {
+        console.error("Failed to load admin home data", usersRes.error || vendorsRes.error || submissionsRes.error);
+        setUsers([]);
+        setVendors([]);
+        setSubmissions([]);
+        setLoading(false);
+        return;
+      }
+
+      setUsers(usersRes.data ?? []);
+      setVendors(vendorsRes.data ?? []);
+      setSubmissions(submissionsRes.data ?? []);
+      setLoading(false);
+    };
+    void loadData();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const adminStats = useMemo(() => {
+    const totalVendors = {
+      active: vendors.filter((v) => (v.status || "").toLowerCase() === "active").length,
+      pending: vendors.filter((v) => (v.status || "").toLowerCase() === "pending").length,
+      inactive: vendors.filter((v) => (v.status || "").toLowerCase() === "inactive").length,
+    };
+    const totalTryOnsToday = submissions.filter((s) => {
+      if (!s.created_at) return false;
+      const d = new Date(s.created_at);
+      const now = new Date();
+      return d.toDateString() === now.toDateString();
+    }).length;
+    const revenueThisMonth = vendors.reduce((sum, v) => sum + (v.plan_price ?? 0), 0);
+    return {
+      totalUsers: users.length,
+      usersGrowth: 0,
+      totalVendors,
+      totalTryOnsToday,
+      revenueThisMonth,
+      revenueGrowth: 0,
+      platformTryOnsRemaining: vendors.reduce((sum, v) => sum + Math.max(0, (v.monthly_pool ?? 0) - (v.pool_used ?? 0)), 0),
+      activePromoCodes: 0,
+    };
+  }, [users, vendors, submissions]);
+
+  const recentSignups = useMemo(
+    () =>
+      [...users]
+        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+        .slice(0, 5)
+        .map((u, idx) => ({
+          id: idx + 1,
+          name: u.full_name || u.email?.split("@")[0] || "User",
+          email: u.email || "—",
+          plan: (u.plan || "free").charAt(0).toUpperCase() + (u.plan || "free").slice(1),
+        })),
+    [users],
+  );
+
+  const recentVendorRegs = useMemo(
+    () =>
+      [...vendors]
+        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+        .slice(0, 5)
+        .map((v, idx) => ({
+          id: idx + 1,
+          name: v.store_name || "Vendor",
+          country: v.country || "—",
+          flag: "🏪",
+          status: (v.status || "pending") as "active" | "pending" | "inactive",
+        })),
+    [vendors],
+  );
+
+  const recentPayments = useMemo(
+    () =>
+      [...vendors]
+        .filter((v) => (v.plan_price ?? 0) > 0)
+        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+        .slice(0, 5)
+        .map((v, idx) => ({
+          id: idx + 1,
+          user: v.store_name || "Vendor",
+          amount: v.plan_price ?? 0,
+          plan: "Vendor Plan",
+          status: "success" as const,
+        })),
+    [vendors],
+  );
+
+  const urgentAlerts = useMemo(() => {
+    const lowPool = vendors
+      .filter((v) => (v.monthly_pool ?? 0) > 0 && (v.pool_used ?? 0) >= (v.monthly_pool ?? 0))
+      .slice(0, 2)
+      .map((v, idx) => ({ id: idx + 1, message: `Vendor '${v.store_name || "Unknown"}' pool exhausted`, type: "critical" as const }));
+    return lowPool;
+  }, [vendors]);
+
+  const userGrowthData = useMemo(
+    () =>
+      [...users]
+        .filter((u) => u.created_at)
+        .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+        .slice(-30)
+        .map((u, idx) => ({ day: dayLabel(u.created_at), users: idx + 1 })),
+    [users],
+  );
+
+  const dailyTryOnsData = useMemo(() => {
+    const buckets = new Map<string, number>();
+    submissions.forEach((s) => {
+      const key = dayLabel(s.created_at).split(" ").join("");
+      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    });
+    return Array.from(buckets.entries()).slice(-7).map(([day, tryOns]) => ({ day, tryOns }));
+  }, [submissions]);
+
+  return (
   <div className="space-y-6">
     {/* Urgent Alerts */}
     {urgentAlerts.length > 0 && (
@@ -95,6 +235,10 @@ const AdminHome = () => (
           ))}
         </div>
       </motion.div>
+    )}
+    {loading && <div className="text-sm text-muted-foreground">Loading dashboard data...</div>}
+    {!loading && users.length === 0 && vendors.length === 0 && submissions.length === 0 && (
+      <div className="text-sm text-muted-foreground">No admin data found.</div>
     )}
 
     {/* Stat Cards */}
@@ -172,7 +316,7 @@ const AdminHome = () => (
         <h3 className="font-display text-sm font-extrabold tracking-wide mb-4">User Growth (30 days)</h3>
         <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={userGrowthData}>
+            <LineChart data={userGrowthData.length ? userGrowthData : [{ day: "N/A", users: 0 }]}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 16%)" />
               <XAxis dataKey="day" tick={{ fill: "hsl(0 0% 55%)", fontSize: 10 }} tickLine={false} axisLine={false} interval={4} />
               <YAxis tick={{ fill: "hsl(0 0% 55%)", fontSize: 10 }} tickLine={false} axisLine={false} width={45} />
@@ -188,7 +332,7 @@ const AdminHome = () => (
         <h3 className="font-display text-sm font-extrabold tracking-wide mb-4">Daily Try-ons (7 days)</h3>
         <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dailyTryOnsData}>
+            <BarChart data={dailyTryOnsData.length ? dailyTryOnsData : [{ day: "N/A", tryOns: 0 }]}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 16%)" />
               <XAxis dataKey="day" tick={{ fill: "hsl(0 0% 55%)", fontSize: 10 }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fill: "hsl(0 0% 55%)", fontSize: 10 }} tickLine={false} axisLine={false} width={45} />
@@ -200,6 +344,7 @@ const AdminHome = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default AdminHome;

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Check, X, ChevronRight, Edit2 } from "lucide-react";
-import { allVendors } from "@/data/adminMockData";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 
 const StatusBadge = ({ status }: { status: string }) => {
   const s: Record<string, string> = {
@@ -11,23 +12,66 @@ const StatusBadge = ({ status }: { status: string }) => {
   return <span className={`px-2.5 py-0.5 rounded-full font-display text-[10px] tracking-[0.1em] uppercase font-bold ${s[status] || s.active}`}>{status}</span>;
 };
 
-type Vendor = { id: number; name: string; country: string; flag: string; subdomain: string; poolSize: number; poolUsed: number; poolRemaining: number; perCustomerLimit: number; planPrice: number; currency: string; status: "active" | "pending" | "inactive"; registered: string; revenue: number };
+type Vendor = { id: string; name: string; country: string; flag: string; subdomain: string; poolSize: number; poolUsed: number; poolRemaining: number; perCustomerLimit: number; planPrice: number; currency: string; status: "active" | "pending" | "inactive"; registered: string; revenue: number };
+
+const mapVendorRow = (row: Tables<"vendors">): Vendor => {
+  const poolSize = row.monthly_pool ?? 0;
+  const poolUsed = row.pool_used ?? 0;
+  return {
+    id: row.id,
+    name: row.store_name ?? "Vendor",
+    country: row.country ?? "—",
+    flag: "🏪",
+    subdomain: row.store_name ? `${row.store_name.toLowerCase().replace(/\s+/g, "-")}.ketra.in` : "—",
+    poolSize,
+    poolUsed,
+    poolRemaining: Math.max(0, poolSize - poolUsed),
+    perCustomerLimit: row.per_customer_limit ?? 0,
+    planPrice: row.plan_price ?? 0,
+    currency: row.currency ?? "INR",
+    status: ((row.status as "active" | "pending" | "inactive") ?? "pending"),
+    registered: row.created_at ? new Date(row.created_at).toLocaleDateString() : "—",
+    revenue: 0,
+  };
+};
 
 const AdminVendors = () => {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [vendorList, setVendorList] = useState<Vendor[]>(allVendors as Vendor[]);
-  const [selectedVendor, setSelectedVendor] = useState<number | null>(null);
+  const [vendorList, setVendorList] = useState<Vendor[]>([]);
+  const [selectedVendor, setSelectedVendor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = vendorList.filter((v) => {
+  useEffect(() => {
+    let alive = true;
+    const loadVendors = async () => {
+      setLoading(true);
+      const { data, error } = await supabase.from("vendors").select("*");
+      if (!alive) return;
+      if (error) {
+        console.error("Failed to load vendors", error);
+        setVendorList([]);
+        setLoading(false);
+        return;
+      }
+      setVendorList((data ?? []).map(mapVendorRow));
+      setLoading(false);
+    };
+    void loadVendors();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const filtered = useMemo(() => vendorList.filter((v) => {
     const matchSearch = v.name.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === "all" || v.status === filterStatus;
     return matchSearch && matchStatus;
-  });
+  }), [vendorList, search, filterStatus]);
 
   const selected = selectedVendor ? vendorList.find((v) => v.id === selectedVendor) : null;
 
-  const updateStatus = (id: number, status: "active" | "pending" | "inactive") => {
+  const updateStatus = (id: string, status: "active" | "pending" | "inactive") => {
     setVendorList((prev) => prev.map((v) => (v.id === id ? { ...v, status } : v)));
   };
 
@@ -97,6 +141,11 @@ const AdminVendors = () => {
       {/* Table */}
       <div className="bg-card/70 backdrop-blur-sm border border-border/40 rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading vendors...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">No vendors found.</div>
+          ) : (
           <table className="w-full">
             <thead>
               <tr className="border-b border-border/40">
@@ -130,6 +179,7 @@ const AdminVendors = () => {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

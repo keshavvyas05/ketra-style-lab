@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Download, ChevronRight, Plus, X } from "lucide-react";
-import { allUsers } from "@/data/adminMockData";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 
 const PlanBadge = ({ plan }: { plan: string }) => {
   const c: Record<string, string> = {
@@ -16,18 +17,77 @@ const StatusDot = ({ status }: { status: string }) => (
   <span className={`w-2 h-2 rounded-full inline-block ${status === "active" ? "bg-[hsl(160_60%_45%)]" : "bg-[hsl(0_60%_55%)]"}`} />
 );
 
+type UserView = {
+  id: string;
+  name: string;
+  email: string;
+  plan: string;
+  tryOnsRemaining: number;
+  tryOnsUsed: number;
+  instagram: string;
+  memberSince: string;
+  status: "active" | "inactive";
+};
+
+const toTitle = (value: string | null) => {
+  if (!value) return "Free";
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+};
+
+const mapUserRow = (row: Tables<"users">): UserView => {
+  const displayName =
+    row.full_name?.trim() ||
+    row.email?.split("@")[0] ||
+    "User";
+  return {
+    id: row.id,
+    name: displayName,
+    email: row.email ?? "—",
+    plan: toTitle(row.plan),
+    tryOnsRemaining: row.tryon_count ?? 0,
+    tryOnsUsed: row.total_tryons_used ?? 0,
+    instagram: row.instagram_id ?? "—",
+    memberSince: row.created_at ? new Date(row.created_at).toLocaleDateString() : "—",
+    status: row.is_active ? "active" : "inactive",
+  };
+};
+
 const AdminUsers = () => {
   const [search, setSearch] = useState("");
   const [filterPlan, setFilterPlan] = useState("all");
-  const [selectedUser, setSelectedUser] = useState<number | null>(null);
+  const [users, setUsers] = useState<UserView[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = allUsers.filter((u) => {
-    const matchSearch = u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
+  useEffect(() => {
+    let alive = true;
+    const loadUsers = async () => {
+      setLoading(true);
+      const { data, error } = await supabase.from("users").select("*");
+      if (!alive) return;
+      if (error) {
+        console.error("Failed to load users", error);
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+      setUsers((data ?? []).map(mapUserRow));
+      setLoading(false);
+    };
+    void loadUsers();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const filtered = useMemo(() => users.filter((u) => {
+    const q = search.toLowerCase();
+    const matchSearch = u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
     const matchPlan = filterPlan === "all" || u.plan === filterPlan;
     return matchSearch && matchPlan;
-  });
+  }), [users, search, filterPlan]);
 
-  const selected = selectedUser ? allUsers.find((u) => u.id === selectedUser) : null;
+  const selected = selectedUser ? users.find((u) => u.id === selectedUser) : null;
 
   return (
     <div className="space-y-4">
@@ -94,6 +154,11 @@ const AdminUsers = () => {
       {/* Table */}
       <div className="bg-card/70 backdrop-blur-sm border border-border/40 rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading users...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">No users found.</div>
+          ) : (
           <table className="w-full">
             <thead>
               <tr className="border-b border-border/40">
@@ -125,6 +190,7 @@ const AdminUsers = () => {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

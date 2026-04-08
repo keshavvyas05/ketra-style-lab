@@ -3,7 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider, ProtectedRoute, VendorProtectedRoute } from "@/auth/AuthProvider";
+import { AuthProvider, AdminProtectedRoute, ProtectedRoute, VendorProtectedRoute, useAuth } from "@/auth/AuthProvider";
+import TryOnRouteGuard from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import About from "./pages/About";
 import VirtualTryOnPage from "./pages/VirtualTryOnPage";
@@ -17,11 +18,30 @@ import PlansPage from "./pages/PlansPage";
 import StyleSurveyPage from "./pages/StyleSurveyPage";
 import DashboardPage from "./pages/DashboardPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import AdminFullDashboardPage from "./pages/AdminFullDashboardPage";
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./components/ScrollToTop";
 import FAQChatbot from "./components/FAQChatbot";
 
 const queryClient = new QueryClient();
+
+const GuardedTryOnPage = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <TryOnRouteGuard user={user}>
+      <VirtualTryOnPage />
+    </TryOnRouteGuard>
+  );
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -34,7 +54,8 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/about" element={<About />} />
-            <Route path="/virtual-tryon" element={<VirtualTryOnPage />} />
+            <Route path="/virtual-tryon" element={<GuardedTryOnPage />} />
+            <Route path="/tryon" element={<GuardedTryOnPage />} />
             <Route path="/ai-stylist" element={<AIStylistPage />} />
             <Route path="/ootw" element={<OOTWPage />} />
             <Route path="/vendor" element={<VendorPage />} />
@@ -58,7 +79,22 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
-            <Route path="/admin" element={<AdminDashboardPage />} />
+            <Route
+              path="/admin"
+              element={
+                <AdminProtectedRoute>
+                  <AdminDashboardPage />
+                </AdminProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/dashboard"
+              element={
+                <AdminProtectedRoute>
+                  <AdminFullDashboardPage />
+                </AdminProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <FAQChatbot />

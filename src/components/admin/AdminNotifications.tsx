@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, RotateCcw, Bell, Mail, MessageCircle } from "lucide-react";
-import { notificationsLog } from "@/data/adminMockData";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 
 const typeBadgeColors: Record<string, string> = {
   welcome: "bg-[hsl(200_70%_55%_/_0.15)] text-[hsl(200_70%_55%)]",
@@ -12,15 +13,39 @@ const typeBadgeColors: Record<string, string> = {
   "pool-warning": "bg-[hsl(45_100%_55%_/_0.15)] text-[hsl(45_100%_45%)]",
 };
 
+type NotificationRow = Tables<"notifications">;
+
 const AdminNotifications = () => {
   const [filterType, setFilterType] = useState("all");
   const [filterChannel, setFilterChannel] = useState("all");
+  const [logs, setLogs] = useState<NotificationRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = notificationsLog.filter((n) => {
+  useEffect(() => {
+    let alive = true;
+    const loadLogs = async () => {
+      setLoading(true);
+      const { data, error } = await supabase.from("notifications").select("*");
+      if (!alive) return;
+      if (error) {
+        console.error("Failed to load notifications", error);
+        setLogs([]);
+      } else {
+        setLogs(data ?? []);
+      }
+      setLoading(false);
+    };
+    void loadLogs();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const filtered = useMemo(() => logs.filter((n) => {
     const matchType = filterType === "all" || n.type === filterType;
     const matchChannel = filterChannel === "all" || n.channel === filterChannel;
     return matchType && matchChannel;
-  });
+  }), [logs, filterType, filterChannel]);
 
   return (
     <div className="space-y-4">
@@ -56,27 +81,27 @@ const AdminNotifications = () => {
             <tbody>
               {filtered.map((n) => (
                 <tr key={n.id} className="border-b border-border/20 hover:bg-secondary/20 transition-colors">
-                  <td className="py-3 px-3 font-display text-sm font-bold">{n.recipient}</td>
+                  <td className="py-3 px-3 font-display text-sm font-bold">{n.recipient_id || "Unknown"}</td>
                   <td className="py-3 px-3">
-                    <span className="px-2 py-0.5 rounded-full bg-secondary font-display text-[9px] tracking-[0.1em] uppercase">{n.recipientType}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-secondary font-display text-[9px] tracking-[0.1em] uppercase">{n.recipient_type || "user"}</span>
                   </td>
                   <td className="py-3 px-3">
-                    <span className={`px-2.5 py-0.5 rounded-full font-display text-[9px] tracking-[0.1em] uppercase font-bold ${typeBadgeColors[n.type] || "bg-secondary text-muted-foreground"}`}>
-                      {n.type}
+                    <span className={`px-2.5 py-0.5 rounded-full font-display text-[9px] tracking-[0.1em] uppercase font-bold ${typeBadgeColors[n.type || ""] || "bg-secondary text-muted-foreground"}`}>
+                      {n.type || "notice"}
                     </span>
                   </td>
                   <td className="py-3 px-3">
                     <span className="flex items-center gap-1 font-body text-xs text-muted-foreground">
                       {n.channel === "email" ? <Mail size={12} /> : <MessageCircle size={12} />}
-                      {n.channel}
+                      {n.channel || "email"}
                     </span>
                   </td>
                   <td className="py-3 px-3">
                     <span className={`px-2.5 py-0.5 rounded-full font-display text-[10px] tracking-[0.1em] uppercase font-bold ${n.status === "sent" ? "bg-[hsl(160_60%_45%_/_0.15)] text-[hsl(160_60%_45%)]" : "bg-[hsl(0_60%_55%_/_0.15)] text-[hsl(0_60%_55%)]"}`}>
-                      {n.status}
+                      {n.status || "queued"}
                     </span>
                   </td>
-                  <td className="py-3 px-3 font-body text-xs text-muted-foreground">{n.timestamp}</td>
+                  <td className="py-3 px-3 font-body text-xs text-muted-foreground">{n.created_at ? new Date(n.created_at).toLocaleString() : "—"}</td>
                   <td className="py-3 px-3">
                     {n.status === "failed" && (
                       <button className="p-1.5 rounded-lg bg-accent/15 hover:bg-accent/25 transition-colors" title="Resend">
@@ -88,6 +113,8 @@ const AdminNotifications = () => {
               ))}
             </tbody>
           </table>
+          {loading && <div className="p-4 text-sm text-muted-foreground">Loading notifications...</div>}
+          {!loading && filtered.length === 0 && <div className="p-4 text-sm text-muted-foreground">No notifications found.</div>}
         </div>
       </div>
     </div>
