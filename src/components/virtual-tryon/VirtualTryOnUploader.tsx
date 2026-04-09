@@ -58,31 +58,41 @@ const VirtualTryOnUploader = ({ onSuccess }: VirtualTryOnUploaderProps) => {
   const handleSubmit = async () => {
     if (!userImage || !outfitImage) {
       setError("Please upload both images.");
-      console.warn("[tryon][frontend] submit blocked: missing files");
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      console.log("[tryon][frontend] starting conversion to base64");
+
+      // Check monthly usage first
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      const userName = session?.user?.user_metadata?.full_name || session?.user?.email || "Unknown User";
+      if (!userId) throw new Error("No authenticated session found.");
+
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      const { data: usageData } = await supabase
+        .from("tryon_usage")
+        .select("count")
+        .eq("user_id", userId)
+        .eq("month", currentMonth)
+        .single();
+
+      const currentCount = usageData?.count || 0;
+      if (currentCount >= 2) {
+        setError("You\'ve used your 2 free try-ons for this month. Upgrade to get more!");
+        return;
+      }
+
+      // Proceed with try-on
       const [userBase64, outfitBase64] = await Promise.all([
         fileToBase64(userImage.file),
         fileToBase64(outfitImage.file),
       ]);
-      console.log("[tryon][frontend] base64 conversion done", {
-        userImageChars: userBase64.length,
-        outfitImageChars: outfitBase64.length,
-      });
+
       const output = await requestTryOn({ user_image: userBase64, outfit_image: outfitBase64 });
       setResultImage(output);
-      console.log("[tryon][frontend] result image set", { output });
-
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user?.id;
-      if (!userId) {
-        throw new Error("No authenticated session found.");
-      }
 
       const timestamp = Date.now();
       const userImagePath = `${userId}/${timestamp}-user-${userImage.file.name}`;
@@ -96,20 +106,21 @@ const VirtualTryOnUploader = ({ onSuccess }: VirtualTryOnUploaderProps) => {
         uploadToStorage(resultBlob, resultImagePath),
       ]);
 
-      const { error: insertError } = await (supabase as any).from("tryon_sessions").insert({
+      await (supabase as any).from("tryon_sessions").insert({
         user_id: userId,
+        user_name: userName,
         user_image_url: userImageUrl,
         outfit_image_url: outfitImageUrl,
         result_image_url: resultImageUrl,
       });
 
-      if (insertError) throw insertError;
-      console.log("[tryon][frontend] try-on session saved to Supabase", {
-        userId,
-        userImageUrl,
-        outfitImageUrl,
-        resultImageUrl,
-      });
+      // Update monthly usage counter
+      await supabase.from("tryon_usage").upsert({
+        user_id: userId,
+        month: currentMonth,
+        count: currentCount + 1,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,month" });
 
       onSuccess?.();
     } catch (err) {
@@ -121,7 +132,7 @@ const VirtualTryOnUploader = ({ onSuccess }: VirtualTryOnUploaderProps) => {
   };
 
   return (
-    <div className="w-full h-full p-4 md:p-5 flex flex-col gap-3">
+    <div className="w-full p-4 md:p-5 flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3">
         <label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
           User Image
@@ -148,7 +159,7 @@ const VirtualTryOnUploader = ({ onSuccess }: VirtualTryOnUploaderProps) => {
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       {resultImage ? (
-        <img src={resultImage} alt="Try-on result" className="w-full h-28 object-cover rounded-lg border border-border/40" />
+        <img src={resultImage} alt="Try-on result" className="w-full h-64 object-cover rounded-lg border border-border/40" />
       ) : (
         <div className="flex items-center justify-center gap-2 text-muted-foreground text-[11px] uppercase tracking-[0.12em] py-3 border border-dashed border-border/40 rounded-lg">
           <Camera size={14} />

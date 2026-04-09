@@ -5,7 +5,7 @@ export type TryOnRequest = {
 
 export type TryOnSuccessResponse = {
   success: true;
-  output_image: string;
+  data: any;
 };
 
 export type TryOnErrorResponse = {

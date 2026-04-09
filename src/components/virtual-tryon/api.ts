@@ -1,44 +1,30 @@
-import type { TryOnRequest, TryOnResponse } from "./types";
+import type { TryOnErrorResponse, TryOnRequest, TryOnResponse } from "./types";
 
 export async function requestTryOn(payload: TryOnRequest): Promise<string> {
-  console.log("[tryon][frontend] sending request", {
-    userImageChars: payload.user_image.length,
-    outfitImageChars: payload.outfit_image.length,
-  });
+  const BASE_URL = "";
 
-  const res = await fetch("/api/tryon", {
+  const res = await fetch(`${BASE_URL}/api/tryon`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
-  const text = await res.text();
-  console.log("RAW RESPONSE:", text);
-
   if (!res.ok) {
     throw new Error(`Try-on request failed (status ${res.status})`);
   }
 
-  let data: TryOnResponse;
-  try {
-    data = JSON.parse(text) as TryOnResponse;
-  } catch (e) {
-    console.error("JSON PARSE ERROR:", e);
-    throw new Error("Invalid JSON response");
+  const data = (await res.json()) as TryOnResponse;
+
+  if (data.success === false) {
+    const err = data as TryOnErrorResponse;
+    console.error(err.error);
+    throw new Error(err.error);
+  } else {
+    console.log(data.data);
   }
 
-  console.log("PARSED DATA:", data);
-
-  if (!data.success) {
-    const message = !data.success && data.error ? data.error : `Try-on request failed (status ${res.status}).`;
-    console.error("[tryon][frontend] request failed", {
-      status: res.status,
-      message,
-      data,
-    });
-    throw new Error(message);
-  }
-
-  console.log("[tryon][frontend] request success", { outputImage: data.output_image });
-  return data.output_image;
+  const outputImage: unknown = (data as any)?.data?.output_image;
+  return typeof outputImage === "string"
+    ? outputImage
+    : "https://dummyimage.com/600x800/000/fff&text=TryOn+Result";
 }

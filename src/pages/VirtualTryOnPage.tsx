@@ -161,7 +161,7 @@ const VirtualTryOnPage = () => {
                 initial={{ opacity: 0, scale: 0.92 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.7, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="rounded-2xl border border-border/40 bg-card/20 backdrop-blur-sm aspect-[3/4] flex flex-col items-center justify-center gap-4 relative overflow-hidden"
+                className="rounded-2xl border border-border/40 bg-card/20 backdrop-blur-sm flex flex-col items-start gap-4 relative overflow-visible h-auto min-h-fit"
               >
                 {/* Decorative corner accents */}
                 <div className="absolute top-3 left-3 w-6 h-6 border-t-2 border-l-2 border-primary/40 rounded-tl-lg" />
